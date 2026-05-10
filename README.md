@@ -1,2 +1,2 @@
 # scorpiov-wildcard-node
-Comfyui Node that allows loads wildcard values from within the prompt and files. Also loads loras in prompt.
+All-in-one wildcard processor with LoRA loading, serial/random modes, and prompt preview.
