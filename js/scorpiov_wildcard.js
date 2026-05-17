@@ -80,11 +80,17 @@ function addPreviewTextarea(node) {
     return widget;
 }
 
+// ── Shared setup applied to both wildcard node types ─────────────────────────
+const SCORPIOV_WILDCARD_NODES = [
+    "ScorpiovWildcardProcessor",
+    "ScorpiovWildcardPrompter",
+];
+
 app.registerExtension({
     name: "Scorpiov.WildcardProcessor",
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "ScorpiovWildcardProcessor") return;
+        if (!SCORPIOV_WILDCARD_NODES.includes(nodeData.name)) return;
 
         const onNodeCreated = nodeType.prototype.onNodeCreated;
 
@@ -159,7 +165,7 @@ app.registerExtension({
             if (!resolvedText) return;
 
             const node = app.graph.getNodeById(nodeId);
-            if (!node || node.comfyClass !== "ScorpiovWildcardProcessor") return;
+            if (!node || !SCORPIOV_WILDCARD_NODES.includes(node.comfyClass)) return;
 
             // Update the textarea
             if (node._scorpiovPreviewTextarea) {

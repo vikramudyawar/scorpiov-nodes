@@ -328,13 +328,80 @@ class ScorpiovWildcardProcessor:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  Scorpiov Wildcard Prompter
+#
+#  A text-only variant of the Wildcard Processor.
+#  - No inputs whatsoever (no model, no clip)
+#  - No LoRA loading (nothing to apply them to)
+#  - Output is purely the resolved text string
+#  - Same wildcard engine, same UI buttons and preview textarea
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ScorpiovWildcardPrompter:
+    """
+    Text-only wildcard processor.
+    Resolves __file__ wildcards and {a|b|c} inline groups in the prompt
+    and outputs the resulting string — no model or clip required.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text": ("STRING", {
+                    "multiline": True,
+                    "default":   "masterpiece, {girl|boy}, __hairstyles__",
+                }),
+                "mode": (["random", "serial"], {"default": "random"}),
+                "seed": ("INT", {
+                    "default": 0, "min": 0, "max": 0xffffffffffffffff,
+                }),
+                "serial_start_line": ("INT", {
+                    "default": 1, "min": 1, "max": 9999,
+                    "tooltip": "Serial mode: which line to start from (1 = first). "
+                               "Applies to all wildcards in this prompt.",
+                }),
+            },
+            "hidden": {"unique_id": "UNIQUE_ID"},
+        }
+
+    RETURN_TYPES  = ("STRING",)
+    RETURN_NAMES  = ("processed_text",)
+    FUNCTION      = "process"
+    CATEGORY      = "Scorpiov/Prompt"
+    OUTPUT_NODE   = True
+
+    def process(self, text, mode, seed, serial_start_line, unique_id="0"):
+
+        node_id = str(unique_id)
+
+        resolved = process_text(
+            text=text, mode=mode, start_line=serial_start_line,
+            node_id=node_id, seed=seed,
+        )
+        _last_resolved[node_id] = resolved
+        print(f"[Scorpiov Wildcard Prompter] Resolved:\n{resolved}\n")
+
+        return {
+            "ui":     {"preview_text": [resolved]},
+            "result": (resolved,),
+        }
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        return float("nan")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Registration
 # ─────────────────────────────────────────────────────────────────────────────
 
 NODE_CLASS_MAPPINGS = {
     "ScorpiovWildcardProcessor": ScorpiovWildcardProcessor,
+    "ScorpiovWildcardPrompter":  ScorpiovWildcardPrompter,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ScorpiovWildcardProcessor": "Scorpiov Wildcard Processor 🎲",
+    "ScorpiovWildcardPrompter":  "Scorpiov Wildcard Prompter 📝",
 }

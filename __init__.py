@@ -4,6 +4,7 @@ Place this folder in: ComfyUI/custom_nodes/scorpiov-nodes/
 
 Nodes included:
   - Scorpiov Wildcard Processor  (scorpiov_wildcard.py)
+  - Scorpiov Wildcard Prompter   (scorpiov_wildcard.py)
   - Scorpiov Width Height        (scorpiov_width_height.py)
 """
 
