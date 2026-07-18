@@ -57,6 +57,10 @@ function addPreviewTextarea(node) {
         "resize: vertical",
         "cursor: default",
         "outline: none",
+        "white-space: pre-wrap",
+        "overflow-wrap: break-word",
+        "overflow-x: auto",
+        "overflow-y: auto",
     ].join(";");
 
     // Prevent ComfyUI from stealing key events while typing in this box
