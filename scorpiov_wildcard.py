@@ -238,6 +238,20 @@ def _parse_loras(text):
     return clean, loras
 
 
+def _lora_lookup_key(name):
+    """
+    Returns the LoRA index lookup key for a name taken from a <lora:...> tag.
+    Tags commonly include a subfolder prefix, e.g. <lora:Anima\\sshelen:0.8>
+    or <lora:Anima/sshelen:0.8> -- but _build_lora_index() keys files by
+    filename stem only (subfolder-agnostic). Strip any subfolder prefix
+    (either slash style) before taking the stem, or a tag like that would
+    silently fail to match and the LoRA would be skipped with no visible
+    error other than a console warning.
+    """
+    basename = re.split(r'[\\/]+', name)[-1]
+    return os.path.splitext(basename)[0].lower()
+
+
 def _load_loras(model, clip, loras):
     if not loras:
         return model, clip
@@ -245,7 +259,7 @@ def _load_loras(model, clip, loras):
     lora_index = _build_lora_index()
     print(f"[Scorpiov Wildcard] {len(lora_index)} LoRA files indexed.")
     for name, weight in loras:
-        stem = os.path.splitext(name)[0].lower()
+        stem = _lora_lookup_key(name)
         path = lora_index.get(stem)
         if path is None:
             print(f"[Scorpiov Wildcard] WARNING: LoRA not found: '{name}'")

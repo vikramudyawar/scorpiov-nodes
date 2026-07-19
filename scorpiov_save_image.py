@@ -33,6 +33,7 @@ import numpy as np
 import folder_paths
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
+from .scorpiov_hash_utils import get_autov2_hash
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ def _read_workflow(prompt: dict) -> dict:
         "scheduler":    "",
         "seed":         -1,
         "model_name":   "",
+        "model_name_raw": "",   # raw ckpt_name as stored in the workflow, needed to locate the file for hashing
         "vae_name":     "",
     }
 
@@ -98,6 +100,7 @@ def _read_workflow(prompt: dict) -> dict:
                 result["model_name"] = os.path.splitext(
                     os.path.basename(ckpt)
                 )[0]
+                result["model_name_raw"] = ckpt
 
         # ── VAELoader → vae_name ──────────────────────────────────────────
         if ct in _VAE_TYPES and not result["vae_name"]:
@@ -114,7 +117,7 @@ def _read_workflow(prompt: dict) -> dict:
 #  A1111 "parameters" block builder
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_parameters(positive, negative, model, vae, loras,
+def _build_parameters(positive, negative, model, model_hash, vae, loras,
                        steps, cfg, sampler, scheduler, seed, width, height) -> str:
     """
     Build the exact A1111 parameters string that Civitai, A1111, and our
@@ -149,19 +152,25 @@ def _build_parameters(positive, negative, model, vae, loras,
     if width and height:
         params.append(f"Size: {width}x{height}")
 
+    if model_hash and model_hash.strip():
+        params.append(f"Model hash: {model_hash.strip()}")
+
     if model and model.strip():
         params.append(f"Model: {model.strip()}")
 
     if vae and vae.strip():
         params.append(f"VAE: {vae.strip()}")
 
-    # LoRAs — parse "name (weight: 0.75)" lines and emit as tags
+    # LoRAs — parse "name (weight: 0.75) [hash: abc1234567]" lines
     lora_entries = _parse_loras(loras)
     if lora_entries:
         # Embed <lora:name:weight> in the positive prompt line (Civitai reads these)
         # and also add a Lora hashes line on the params line
         lora_tags     = ", ".join(f"<lora:{e['name']}:{e['weight']}>" for e in lora_entries)
-        lora_hash_str = ", ".join(f"{e['name']}: 0000000000" for e in lora_entries)
+        lora_hash_str = ", ".join(
+            f"{e['name']}: {e['hash'] if e['hash'] else '0000000000'}"
+            for e in lora_entries
+        )
         # Inject tags into positive line (line 0) if not already there
         if lora_tags and "<lora:" not in lines[0]:
             lines[0] = (lines[0].rstrip(", ") + ", " + lora_tags).lstrip(", ")
@@ -176,7 +185,14 @@ def _build_parameters(positive, negative, model, vae, loras,
 
 
 def _parse_loras(loras_str: str) -> list:
-    """Parse 'name (weight: 0.75)' lines into list of dicts."""
+    """
+    Parse lines from the "loras" field into a list of dicts.
+    Supported line formats (all optional pieces except name):
+      "name (weight: 0.75) [hash: abc1234567]"   <- from Lora Tag Loader
+      "name (weight: 0.75)"                      <- no hash available
+      "name: weight"                              <- legacy manual format
+      "name"                                       <- weight defaults to 1
+    """
     result = []
     if not loras_str or not loras_str.strip() or loras_str.strip() == "(none)":
         return result
@@ -184,15 +200,22 @@ def _parse_loras(loras_str: str) -> list:
         line = line.strip()
         if not line:
             continue
-        m = re.match(r'^(.+?)\s*\(weight:\s*([0-9.]+)\)', line)
+        m = re.match(
+            r'^(.+?)\s*\(weight:\s*([0-9.]+)\)(?:\s*\[hash:\s*([0-9a-fA-F]*)\])?',
+            line,
+        )
         if m:
-            result.append({"name": m.group(1).strip(), "weight": m.group(2)})
+            result.append({
+                "name":   m.group(1).strip(),
+                "weight": m.group(2),
+                "hash":   (m.group(3) or "").strip(),
+            })
             continue
         parts = line.split(":")
         if len(parts) == 2:
-            result.append({"name": parts[0].strip(), "weight": parts[1].strip()})
+            result.append({"name": parts[0].strip(), "weight": parts[1].strip(), "hash": ""})
             continue
-        result.append({"name": line, "weight": "1"})
+        result.append({"name": line, "weight": "1", "hash": ""})
     return result
 
 
@@ -334,6 +357,20 @@ class ScorpiovSaveImage:
                     "default": True,
                     "tooltip": "Uncheck to save a clean PNG with no embedded metadata.",
                 }),
+                # NOTE: model_hash is intentionally the LAST optional field.
+                # ComfyUI stores widget values as a flat positional array per
+                # node ("widgets_values"), matched to this list purely by
+                # order. Inserting a new field anywhere but the end shifts
+                # every field after it, silently corrupting values in any
+                # workflow saved before the change (e.g. seed receiving the
+                # control_after_generate value, cfg receiving an empty
+                # string). Any future new optional field must also be
+                # appended here, never inserted earlier in this dict.
+                "model_hash": ("STRING", {
+                    "multiline": False,
+                    "default":   "",
+                    "tooltip":   "Auto-detected (SHA256 AutoV2) from the checkpoint file the first time it's used, then cached. Override by typing here.",
+                }),
             },
             "hidden": {
                 "prompt":        "PROMPT",
@@ -354,6 +391,7 @@ class ScorpiovSaveImage:
         negative_prompt,
         loras         = "",
         model_name    = "",
+        model_hash    = "",
         vae_name      = "",
         steps         = 0,
         cfg           = 0.0,
@@ -379,8 +417,17 @@ class ScorpiovSaveImage:
         eff_model   = model_name.strip()   or auto["model_name"]
         eff_vae     = vae_name.strip()     or auto["vae_name"]
 
+        # ── Model hash: manual override, else hash the checkpoint file ─────
+        # (cached — only the very first save after a checkpoint changes pays
+        # the hashing cost; every save after that reuses the cached value)
+        eff_model_hash = model_hash.strip()
+        if not eff_model_hash and auto["model_name_raw"]:
+            ckpt_path = folder_paths.get_full_path("checkpoints", auto["model_name_raw"])
+            if ckpt_path:
+                eff_model_hash = get_autov2_hash(ckpt_path)
+
         print(f"[Scorpiov Save] Auto-detected from workflow:")
-        print(f"  Model    : {eff_model}   VAE: {eff_vae}")
+        print(f"  Model    : {eff_model} (hash: {eff_model_hash or 'unknown'})   VAE: {eff_vae}")
         print(f"  Sampler  : {eff_sampler} / {eff_sched}  steps={eff_steps}  cfg={eff_cfg}  seed={eff_seed}")
 
         results = []
@@ -397,18 +444,19 @@ class ScorpiovSaveImage:
 
             if save_metadata:
                 params_text = _build_parameters(
-                    positive  = positive_prompt,
-                    negative  = negative_prompt,
-                    model     = eff_model,
-                    vae       = eff_vae,
-                    loras     = loras or "",
-                    steps     = eff_steps,
-                    cfg       = eff_cfg,
-                    sampler   = eff_sampler,
-                    scheduler = eff_sched,
-                    seed      = eff_seed,
-                    width     = W,
-                    height    = H,
+                    positive   = positive_prompt,
+                    negative   = negative_prompt,
+                    model      = eff_model,
+                    model_hash = eff_model_hash,
+                    vae        = eff_vae,
+                    loras      = loras or "",
+                    steps      = eff_steps,
+                    cfg        = eff_cfg,
+                    sampler    = eff_sampler,
+                    scheduler  = eff_sched,
+                    seed       = eff_seed,
+                    width      = W,
+                    height     = H,
                 )
                 pnginfo.add_text("parameters", params_text)
 
