@@ -26,7 +26,7 @@ No extra Python dependencies beyond what ComfyUI already ships with.
 ---
 
 ### Wildcard Processor 🎲
-<img width="762" height="789" alt="workflow (2)" src="https://github.com/user-attachments/assets/669292e9-5bd0-4601-a34e-cf0153378e40" />
+<img width="1339" height="946" alt="workflow(3)" src="https://github.com/user-attachments/assets/29fb3b3c-7a6e-4848-9f36-a4e3eea5a13a" />
 
 All-in-one wildcard processor with LoRA loading, serial/random modes, and prompt preview.
 - Put your wildcard `.txt` files into the `wildcards/` folder in the node folder — any subfolder depth, just reference by filename with `__filename__` (no path needed)
@@ -37,7 +37,7 @@ All-in-one wildcard processor with LoRA loading, serial/random modes, and prompt
 
 
 ### Wildcard Prompter 📝
-<img width="1307" height="641" alt="Wildcardprompter" src="https://github.com/user-attachments/assets/e6a1faad-c4d8-4f7f-8e46-5f7637a1db19" />
+<img width="806" height="846" alt="workflow(2)" src="https://github.com/user-attachments/assets/8f7232b8-7637-40d5-8466-4124f2429a1d" />
 
 Text-only variant of the Wildcard Processor — no `model`/`clip` inputs, no LoRA loading. Just resolves wildcards and outputs the string, so you can feed it into a Lora Tag Loader or CLIPTextEncode. Useful when you want to build your prompt text before deciding what to do with it.
 
@@ -54,23 +54,24 @@ Reads `<lora:name:weight>` or `<lora:name:weight:clip_weight>` tags out of a tex
 Typical chain: `Wildcard Prompter` → `Lora Tag Loader` → two `CLIPTextEncode` nodes (positive/negative) → `KSampler`, with `loras_info` also wired to `Save Image`.
 
 ### Width Height
-<img width="588" height="426" alt="workflow" src="https://github.com/user-attachments/assets/832fa349-aa3a-480d-bed5-3348424df556" />
+<img width="1189" height="646" alt="workflow(4)" src="https://github.com/user-attachments/assets/3a13e3a2-5feb-4fe0-80fa-2d6ac39b7713" />
 
 Aspect Ratio Node, set width/height for empty latents or choose from a list
 - Add to the list by updating the `ratios.txt` file in the node folder
   - Eg: `My Custom Ratio (2:1) | 2048 | 1024`
 
 ### Image Meta Reader 🔍
-<img width="1318" height="742" alt="image" src="https://github.com/user-attachments/assets/34791884-daac-4aa9-9f72-49804364f028" />
+<img width="2213" height="1326" alt="workflow(5)" src="https://github.com/user-attachments/assets/b919038d-1ce0-4813-a9ca-802f8687d917" />
 
 Reads PNG metadata in both A1111 and ComfyUI-native JSON formats — model, VAE, LoRAs, prompts, and the full raw metadata — into a single scrollable textarea. Has a "Read Metadata Now" button so you can inspect an image without running the whole workflow.
 
 ### Image Loader 🖼️
+<img width="1808" height="786" alt="Screenshot 2026-07-19 132754" src="https://github.com/user-attachments/assets/f9f223ce-6997-4b8c-88c6-625b38b445a1" />
+
 Loads an image and outputs the tensor, the bare filename, and the full file path — handy when a downstream node needs to know exactly which file it's working with.
 
 ### Save Image 💾
 <img width="498" height="813" alt="image" src="https://github.com/user-attachments/assets/e15a2aee-2b3e-48cf-8658-358e276fe2db" />
-
 
 Saves images with full A1111/Civitai-compatible metadata embedded in the PNG.
 
