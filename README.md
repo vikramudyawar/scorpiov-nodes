@@ -34,10 +34,15 @@ All-in-one wildcard processor with LoRA loading, serial/random modes, and prompt
 - Parses and loads `<lora:name:weight>` tags found in the resolved text directly onto the model/clip
 - Outputs CONDITIONING, MODEL, CLIP, and the resolved STRING
 
+
 ### Wildcard Prompter 📝
+<img width="1307" height="641" alt="Wildcardprompter" src="https://github.com/user-attachments/assets/e6a1faad-c4d8-4f7f-8e46-5f7637a1db19" />
+
 Text-only variant of the Wildcard Processor — no `model`/`clip` inputs, no LoRA loading. Just resolves wildcards and outputs the string, so you can feed it into a Lora Tag Loader or CLIPTextEncode. Useful when you want to build your prompt text before deciding what to do with it.
 
 ### Lora Tag Loader 🏷️
+<img width="1566" height="693" alt="image" src="https://github.com/user-attachments/assets/71fd2cdb-df20-4930-a273-af0fd12e3234" />
+
 Reads `<lora:name:weight>` or `<lora:name:weight:clip_weight>` tags out of a text prompt (e.g. from Wildcard Prompter), loads each named LoRA onto the given model/clip, and strips the tags out of the text so it's safe to feed into a standard `CLIPTextEncode` node.
 
 - `<lora:name:0.8>` → same weight applied to both the model and CLIP
@@ -55,12 +60,17 @@ Aspect Ratio Node, set width/height for empty latents or choose from a list
   - Eg: `My Custom Ratio (2:1) | 2048 | 1024`
 
 ### Image Meta Reader 🔍
+<img width="1318" height="742" alt="image" src="https://github.com/user-attachments/assets/34791884-daac-4aa9-9f72-49804364f028" />
+
 Reads PNG metadata in both A1111 and ComfyUI-native JSON formats — model, VAE, LoRAs, prompts, and the full raw metadata — into a single scrollable textarea. Has a "Read Metadata Now" button so you can inspect an image without running the whole workflow.
 
 ### Image Loader 🖼️
 Loads an image and outputs the tensor, the bare filename, and the full file path — handy when a downstream node needs to know exactly which file it's working with.
 
 ### Save Image 💾
+<img width="498" height="813" alt="image" src="https://github.com/user-attachments/assets/e15a2aee-2b3e-48cf-8658-358e276fe2db" />
+
+
 Saves images with full A1111/Civitai-compatible metadata embedded in the PNG.
 
 - **Required wires:** `images`, `positive_prompt`, `negative_prompt`
