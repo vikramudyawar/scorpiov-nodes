@@ -29,6 +29,28 @@ from server import PromptServer
 from aiohttp import web
 
 
+# Same tag pattern used by scorpiov_lora_tag_loader.py — <lora:name:weight>
+# or <lora:name:weight:clip_weight>. LoRAs applied this way (typed straight
+# into prompt text and loaded by Scorpiov Lora Tag Loader) never show up as
+# a LoraLoader node in the graph, so we scan resolved prompt text for tags
+# directly as well.
+_LORA_TAG_PATTERN = re.compile(
+    r'<lora:([^:>\n]+):([0-9]*\.?[0-9]+)(?::([0-9]*\.?[0-9]+))?>', re.IGNORECASE
+)
+
+
+def _extract_lora_tags(text: str) -> list:
+    tags = []
+    for m in _LORA_TAG_PATTERN.finditer(text or ""):
+        name = m.group(1).strip()
+        # Strip any subfolder prefix (\ or /) before display, matching the
+        # subfolder-agnostic lookup logic in scorpiov_lora_tag_loader.py.
+        basename = re.split(r'[\\/]+', name)[-1]
+        display_name = os.path.splitext(basename)[0]
+        tags.append({"name": display_name, "weight": float(m.group(2))})
+    return tags
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  Helper: resolve a filename to a full path
 #  ComfyUI Load Image nodes output just the filename (e.g. "photo.png").
@@ -206,6 +228,17 @@ def _parse_comfyui(json_text: str) -> dict:
                 result["model"] = os.path.splitext(os.path.basename(ckpt))[0]
                 break
 
+    # Some workflows (e.g. UNet-only / Flux-style setups) load the model via
+    # UNETLoader instead of a checkpoint node. Check this separately since it
+    # uses a different field name ("unet_name" vs "ckpt_name").
+    if not result["model"]:
+        for node in nodes.values():
+            if node.get("class_type") == "UNETLoader":
+                unet = node.get("inputs", {}).get("unet_name", "")
+                if unet:
+                    result["model"] = os.path.splitext(os.path.basename(unet))[0]
+                    break
+
     # ── VAE ───────────────────────────────────────────────────────────────
     VAE_TYPES = {"VAELoader", "VAEDecodeTiled", "VAEEncodeTiled"}
     for node in nodes.values():
@@ -243,38 +276,64 @@ def _parse_comfyui(json_text: str) -> dict:
         "smZ CLIPTextEncode", "BNK_CLIPTextEncode",
     }
 
-    def extract_text_value(raw):
+    MAX_HOPS = 8
+
+    def resolve_value_text(value, depth=0):
         """
-        The "text" field in a CLIPTextEncode node can be:
-          - A plain string  → the prompt was typed directly into the node
-          - A list [id, idx] → the text is wired in from another node
-        In the wired case we follow the link and extract the text from
-        the source node (which is usually a primitive / text node).
-        We keep following up to 5 hops so deeply chained text nodes work.
+        A field's value can be a plain string, or a [node_id, output_index]
+        link. If it's a link, follow it to the source node and ask that node
+        for its text via resolve_node_text(). Keeps hopping until it bottoms
+        out at real text or MAX_HOPS is hit.
         """
-        for _ in range(5):
-            if raw is None:
-                return ""
-            if isinstance(raw, str):
-                return raw.strip()
-            if isinstance(raw, list) and len(raw) == 2:
-                # It's a [node_id, output_index] link — follow it
-                source = nodes.get(str(raw[0]))
-                if source is None:
-                    return ""
-                # Common primitive / text node types
-                source_inputs = source.get("inputs", {})
-                # Try every likely field name for the text value
-                for field in ("text", "value", "string", "prompt"):
-                    candidate = source_inputs.get(field)
-                    if candidate is not None:
-                        raw = candidate   # may itself be a link — loop again
-                        break
-                else:
-                    return ""  # source has no text field we recognise
-            else:
-                return ""  # unexpected type — give up
+        if depth > MAX_HOPS or value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list) and len(value) == 2:
+            source = nodes.get(str(value[0]))
+            return resolve_node_text(source, depth + 1)
         return ""
+
+    def resolve_node_text(node, depth=0):
+        """
+        Given a node, figure out "the text this node represents" — handling
+        a few specific node types whose text doesn't live in a field simply
+        called "text", plus a generic fallback for everything else.
+        """
+        if node is None or depth > MAX_HOPS:
+            return ""
+        ct = node.get("class_type", "")
+        inputs = node.get("inputs", {})
+
+        # WAS Node Suite "Text Concatenate" — text is split across
+        # text_a / text_b / text_c / text_d (+ a delimiter), not one "text"
+        # field. Resolve each piece (which may itself be wired) and join
+        # them in order using the node's own delimiter.
+        if ct == "Text Concatenate":
+            parts = []
+            for key in sorted(k for k in inputs if k.startswith("text_")):
+                parts.append(resolve_value_text(inputs[key], depth + 1))
+            delimiter = inputs.get("delimiter", ", ")
+            if not isinstance(delimiter, str):
+                delimiter = ", "
+            return delimiter.join(p for p in parts if p)
+
+        # Scorpiov Lora Tag Loader — its own "text" input is itself the
+        # upstream source text (it strips <lora:...> tags on its way OUT,
+        # but the wired-in "text" input is the original prompt). Follow it
+        # rather than treating this node as a dead end.
+        if ct == "ScorpiovLoraTagLoader":
+            return resolve_value_text(inputs.get("text"), depth + 1)
+
+        # Generic fallback: try every commonly-used field name for text,
+        # following further links if the field itself is wired.
+        for field in ("text", "value", "string", "prompt"):
+            if field in inputs:
+                resolved = resolve_value_text(inputs[field], depth + 1)
+                if resolved:
+                    return resolved
+
+        return ""  # node type/shape we don't recognise — give up
 
     def get_text_from_node(n):
         if n is None:
@@ -282,14 +341,14 @@ def _parse_comfyui(json_text: str) -> dict:
         ct = n.get("class_type", "")
         if ct in CLIP_ENCODE_TYPES:
             raw = n.get("inputs", {}).get("text", "")
-            return extract_text_value(raw)
+            return resolve_value_text(raw)
         # Some setups chain through conditioning nodes — follow one more level
         cond_input = n.get("inputs", {}).get("conditioning")
         if isinstance(cond_input, list):
             deeper = resolve(cond_input)
             if deeper and deeper.get("class_type") in CLIP_ENCODE_TYPES:
                 raw = deeper.get("inputs", {}).get("text", "")
-                return extract_text_value(raw)
+                return resolve_value_text(raw)
         return ""
 
     positive_texts = []
@@ -317,7 +376,7 @@ def _parse_comfyui(json_text: str) -> dict:
         for node in nodes.values():
             if node.get("class_type") in CLIP_ENCODE_TYPES:
                 raw = node.get("inputs", {}).get("text", "")
-                t = extract_text_value(raw)
+                t = resolve_value_text(raw)
                 if t:
                     clip_texts.append(t)
         # Heuristic: longer text = positive, shorter = negative
@@ -329,6 +388,16 @@ def _parse_comfyui(json_text: str) -> dict:
 
     result["positive_prompt"] = "\n---\n".join(positive_texts)
     result["negative_prompt"] = "\n---\n".join(negative_texts)
+
+    # Pick up LoRAs applied via <lora:name:weight> tags in prompt text
+    # (Scorpiov Lora Tag Loader workflows) — these never appear as a
+    # LoraLoader node, so they're invisible to the node-scan above.
+    existing_names = {l["name"].lower() for l in result["loras"]}
+    combined_text = "\n".join(positive_texts + negative_texts)
+    for tag in _extract_lora_tags(combined_text):
+        if tag["name"].lower() not in existing_names:
+            result["loras"].append(tag)
+            existing_names.add(tag["name"].lower())
 
     return result
 
