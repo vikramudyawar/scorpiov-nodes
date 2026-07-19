@@ -1,5 +1,6 @@
 # scorpiov-nodes
-<img width="786" height="710" alt="Screenshot 2026-05-16 115615" src="https://github.com/user-attachments/assets/39fe0215-2d6f-4a6c-ab8b-69056b8d9166" />
+<img width="3523" height="1477" alt="workflow(1)" src="https://github.com/user-attachments/assets/1a45cb30-7633-44a3-a65e-d0c8af0acdbd" />
+
 
 A collection of custom ComfyUI nodes I use in my own workflows — wildcard prompting, LoRA tag loading, and Civitai-ready image saving with automatic metadata.
 
